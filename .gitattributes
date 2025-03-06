@@ -1,0 +1,4 @@
+build/YouTube[[:space:]]to[[:space:]]MP3[[:space:]]Converter/YouTube[[:space:]]to[[:space:]]MP3[[:space:]]Converter.pkg filter=lfs diff=lfs merge=lfs -text
+*.exe filter=lfs diff=lfs merge=lfs -text
+*.pkg filter=lfs diff=lfs merge=lfs -text
+*.png filter=lfs diff=lfs merge=lfs -text
