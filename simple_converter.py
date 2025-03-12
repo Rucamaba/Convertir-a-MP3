@@ -101,12 +101,12 @@ class PlaylistSelector:
 class SimpleConverterGUI:
     def __init__(self):
         self.window = tk.Tk()
-        self.window.title("YouTube a MP3")
-        self.window.geometry("400x200")
+        self.window.title("YouTube Downloader")
+        self.window.geometry("400x250")
         
         # Centro la ventana
         window_width = 400
-        window_height = 200
+        window_height = 250
         screen_width = self.window.winfo_screenwidth()
         screen_height = self.window.winfo_screenheight()
         x = (screen_width - window_width) // 2
@@ -116,6 +116,31 @@ class SimpleConverterGUI:
         # Marco principal
         self.frame = ttk.Frame(self.window, padding="20")
         self.frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Frame para formato y tiempo
+        format_frame = ttk.Frame(self.frame)
+        format_frame.pack(fill=tk.X, pady=5)
+        
+        # Etiqueta y selector de formato
+        ttk.Label(format_frame, text="Formato:").pack(side=tk.LEFT, padx=(0, 10))
+        self.format_var = tk.StringVar(value="mp3")
+        format_combo = ttk.Combobox(format_frame, textvariable=self.format_var, values=["mp3", "mp4"], state="readonly", width=10)
+        format_combo.pack(side=tk.LEFT)
+        
+        # Frame para tiempo de inicio (inicialmente oculto)
+        self.time_frame = ttk.Frame(self.frame)
+        ttk.Label(self.time_frame, text="Tiempo de inicio (HH:MM:SS):").pack(side=tk.LEFT, padx=(0, 10))
+        self.start_time = ttk.Entry(self.time_frame, width=10)
+        self.start_time.pack(side=tk.LEFT)
+        
+        # Mostrar/ocultar frame de tiempo según el formato
+        def on_format_change(*args):
+            if self.format_var.get() == "mp4":
+                self.time_frame.pack(fill=tk.X, pady=5)
+            else:
+                self.time_frame.pack_forget()
+        
+        format_combo.bind("<<ComboboxSelected>>", on_format_change)
         
         # Etiqueta de instrucción
         ttk.Label(self.frame, text="Pega la URL del video o playlist de YouTube:").pack(pady=5)
@@ -132,9 +157,15 @@ class SimpleConverterGUI:
         self.download_button = ttk.Button(self.frame, text="Analizar URL", command=self.start_analysis)
         self.download_button.pack(pady=10)
 
-        # Carpeta de descargas
-        self.output_dir = os.path.join(os.path.expanduser("~"), "Music", "YouTube Downloads")
-        os.makedirs(self.output_dir, exist_ok=True)
+        # Carpetas de descargas
+        self.mp3_output_dir = os.path.join(os.path.expanduser("~"), "Music", "YouTube Downloads")
+        self.mp4_output_dir = os.path.join(os.path.expanduser("~"), "Videos", "Youtube")
+        os.makedirs(self.mp3_output_dir, exist_ok=True)
+        os.makedirs(self.mp4_output_dir, exist_ok=True)
+
+    def get_output_dir(self):
+        """Retorna el directorio de salida según el formato seleccionado"""
+        return self.mp4_output_dir if self.format_var.get() == "mp4" else self.mp3_output_dir
 
     def update_status(self, message):
         self.status_label.config(text=message)
@@ -143,7 +174,8 @@ class SimpleConverterGUI:
     def get_safe_filename(self, title):
         """Genera un nombre de archivo seguro y retorna la ruta completa"""
         safe_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).rstrip()
-        return os.path.join(self.output_dir, f"{safe_title}.mp3")
+        extension = ".mp4" if self.format_var.get() == "mp4" else ".mp3"
+        return os.path.join(self.get_output_dir(), f"{safe_title}{extension}")
 
     def check_if_exists(self, title):
         """Verifica si una canción ya existe"""
@@ -168,18 +200,61 @@ class SimpleConverterGUI:
                     continue
 
                 # Si no existe, procedemos con la descarga
-                self.update_status(f"Descargando {i}/{total}: {title}")
+                quality_msg = "Full HD o superior" if self.format_var.get() == "mp4" else "320kbps"
+                self.update_status(f"Descargando {i}/{total}: {title}\nCalidad: {quality_msg}")
 
-                # Configuración de yt-dlp
-                ydl_opts = {
-                    "format": "bestaudio/best",
-                    "postprocessors": [{
-                        "key": "FFmpegExtractAudio",
-                        "preferredcodec": "mp3",
-                        "preferredquality": "320",
-                    }],
-                    "ffmpeg_location": ffmpeg_path,
-                    "outtmpl": os.path.join(self.output_dir, "%(title)s.%(ext)s"),
+                # Configuración de yt-dlp según el formato
+                if self.format_var.get() == "mp4":
+                    ydl_opts = {
+                        "format": "bestvideo[ext=mp4][height>=1080]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4][height>=720]/best[ext=mp4]/best",
+                        "ffmpeg_location": ffmpeg_path,
+                        "outtmpl": os.path.join(self.get_output_dir(), "%(title)s.%(ext)s"),
+                        "sleep_interval": 1,
+                        "max_sleep_interval": 5,
+                        "merge_output_format": "mp4",
+                        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                        "http_headers": {
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                            "Accept-Language": "en-us,en;q=0.5",
+                            "Sec-Fetch-Mode": "navigate"
+                        },
+                        "progress_hooks": [lambda d: self.update_status(f"Descargando: {d.get('_percent_str', '0%')}")]
+                    }
+                    
+                    # Procesar tiempo de inicio si está configurado
+                    start_time = self.start_time.get().strip()
+                    if start_time:
+                        try:
+                            total_seconds = self.time_str_to_seconds(start_time)
+                            # Agregar filtro de tiempo usando ffmpeg-args
+                            ydl_opts["postprocessor_args"] = []
+                            ydl_opts["postprocessor_args"].extend([
+                                '-ss', str(total_seconds),
+                                '-avoid_negative_ts', 'make_zero'
+                            ])
+                            # Asegurarnos que se use el postprocesador de FFmpeg
+                            if "postprocessors" not in ydl_opts:
+                                ydl_opts["postprocessors"] = []
+                            ydl_opts["postprocessors"].append({
+                                'key': 'FFmpegVideoRemuxer',
+                                'preferedformat': 'mp4'
+                            })
+                            # Informar al usuario que puede tardar más
+                            self.update_status("Preparando descarga desde tiempo específico...\nNota: Los videos con tiempo de inicio pueden tardar más en procesarse")
+                        except ValueError as e:
+                            messagebox.showwarning("Error", str(e))
+                            return
+                else:
+                    ydl_opts = {
+                        "format": "bestaudio/best",
+                        "postprocessors": [{
+                            "key": "FFmpegExtractAudio",
+                            "preferredcodec": "mp3",
+                            "preferredquality": "320",
+                        }],
+                        "ffmpeg_location": ffmpeg_path,
+                        "outtmpl": os.path.join(self.get_output_dir(), "%(title)s.%(ext)s"),
                     "quiet": True,
                     "sleep_interval": 1,  # Esperar 1 segundo entre solicitudes
                     "max_sleep_interval": 5,  # Máximo 5 segundos de espera
@@ -201,9 +276,10 @@ class SimpleConverterGUI:
                     continue
 
             if downloaded > 0:
-                status = f"¡Descargas completadas!\nCanciones descargadas: {downloaded}"
+                format_type = "videos" if self.format_var.get() == "mp4" else "canciones"
+                status = f"¡Descargas completadas!\n{format_type.capitalize()} descargados: {downloaded}"
                 self.update_status(status)
-                messagebox.showinfo("Éxito", f"{status}\nGuardadas en:\n{self.output_dir}")
+                messagebox.showinfo("Éxito", f"{status}\nGuardados en:\n{self.get_output_dir()}")
             else:
                 self.update_status("No se descargaron nuevas canciones")
             
@@ -221,10 +297,58 @@ class SimpleConverterGUI:
             self.update_status("No se seleccionaron videos")
             self.download_button.config(state=tk.NORMAL)
 
+    def seconds_to_time_str(self, total_seconds):
+        """Convierte segundos a formato HH:MM:SS"""
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        seconds = total_seconds % 60
+        if hours > 0:
+            return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        return f"{minutes:02d}:{seconds:02d}"
+
+    def time_str_to_seconds(self, time_str):
+        """Convierte formato HH:MM:SS o MM:SS a segundos"""
+        try:
+            parts = time_str.split(":")
+            if len(parts) == 3:  # HH:MM:SS
+                hours, minutes, seconds = map(int, parts)
+                return hours * 3600 + minutes * 60 + seconds
+            elif len(parts) == 2:  # MM:SS
+                minutes, seconds = map(int, parts)
+                return minutes * 60 + seconds
+            raise ValueError
+        except:
+            raise ValueError("Formato de tiempo inválido. Usa HH:MM:SS o MM:SS")
+
+    def extract_time_from_url(self, url):
+        """Extrae el tiempo de inicio de la URL de YouTube"""
+        try:
+            if 't=' in url:
+                # Separar la URL en partes usando & como delimitador
+                params = url.split('?')[-1].split('&')
+                # Buscar el parámetro que comienza con t=
+                for param in params:
+                    if param.startswith('t='):
+                        time_str = param[2:]  # Eliminar 't='
+                        seconds = int(time_str)
+                        return self.seconds_to_time_str(seconds)
+        except:
+            pass
+        return ""
+
     def analyze_url(self, url):
         try:
             current_dir = os.path.dirname(os.path.abspath(__file__))
             ffmpeg_path = os.path.join(current_dir, "ffmpeg", "ffmpeg-7.1-essentials_build", "bin")
+
+            # Si es MP4, buscar tiempo en la URL
+            if self.format_var.get() == "mp4":
+                start_time = self.extract_time_from_url(url)
+                if start_time:
+                    self.start_time.delete(0, tk.END)
+                    self.start_time.insert(0, start_time)
+                    # Mostrar el campo de tiempo si hay un tiempo en la URL
+                    self.time_frame.pack(fill=tk.X, pady=5)
 
             # Detectar si es un Mix de YouTube
             is_mix = 'mix' in url.lower() or 'RD' in url or 'start_radio=1' in url
